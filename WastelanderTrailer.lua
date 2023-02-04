@@ -1,7 +1,44 @@
 -- WastelanderTrailer
 -- by Hexarobi
 
-local SCRIPT_VERSION = "0.2"
+local SCRIPT_VERSION = "0.3"
+
+---
+--- Auto-Updater Lib Install
+---
+
+-- Auto Updater from https://github.com/hexarobi/stand-lua-auto-updater
+local status, auto_updater = pcall(require, "auto-updater")
+if not status then
+    local auto_update_complete = nil util.toast("Installing auto-updater...", TOAST_ALL)
+    async_http.init("raw.githubusercontent.com", "/hexarobi/stand-lua-auto-updater/main/auto-updater.lua",
+            function(result, headers, status_code)
+                local function parse_auto_update_result(result, headers, status_code)
+                    local error_prefix = "Error downloading auto-updater: "
+                    if status_code ~= 200 then util.toast(error_prefix..status_code, TOAST_ALL) return false end
+                    if not result or result == "" then util.toast(error_prefix.."Found empty file.", TOAST_ALL) return false end
+                    filesystem.mkdir(filesystem.scripts_dir() .. "lib")
+                    local file = io.open(filesystem.scripts_dir() .. "lib\\auto-updater.lua", "wb")
+                    if file == nil then util.toast(error_prefix.."Could not open file for writing.", TOAST_ALL) return false end
+                    file:write(result) file:close() util.toast("Successfully installed auto-updater lib", TOAST_ALL) return true
+                end
+                auto_update_complete = parse_auto_update_result(result, headers, status_code)
+            end, function() util.toast("Error downloading auto-updater lib. Update failed to download.", TOAST_ALL) end)
+    async_http.dispatch() local i = 1 while (auto_update_complete == nil and i < 40) do util.yield(250) i = i + 1 end
+    if auto_update_complete == nil then error("Error downloading auto-updater lib. HTTP Request timeout") end
+    auto_updater = require("auto-updater")
+end
+if auto_updater == true then error("Invalid auto-updater lib. Please delete your Stand/Lua Scripts/lib/auto-updater.lua and try again") end
+
+---
+--- Auto Update
+---
+
+local auto_update_config = {
+    source_url = "https://raw.githubusercontent.com/hexarobi/stand-lua-wastelandertrailer/main/WastelanderTrailer.lua",
+    script_relpath = SCRIPT_RELPATH,
+}
+auto_updater.run_auto_update(auto_update_config)
 
 ---
 --- Dependencies
@@ -13,32 +50,8 @@ util.require_natives(1651208000)
 --- State
 ---
 
-local attachments = {}
+local state = {}
 local menus = {}
-
----
---- Utils
----
-
--- From https://stackoverflow.com/questions/12394841/safely-remove-items-from-an-array-table-while-iterating
-local function array_remove(t, fnKeep)
-    local j, n = 1, #t;
-
-    for i=1,n do
-        if (fnKeep(t, i, j)) then
-            -- Move i's kept value to j's position, if it's not already there.
-            if (i ~= j) then
-                t[j] = t[i];
-                t[i] = nil;
-            end
-            j = j + 1; -- Increment position of where we'll place the next kept value.
-        else
-            t[i] = nil;
-        end
-    end
-
-    return t;
-end
 
 ---
 --- Attachments
@@ -105,11 +118,16 @@ local function attach(attachment)
     update_attachment_position(attachment)
 
     ENTITY.SET_ENTITY_NO_COLLISION_ENTITY(attachment.root, attachment.handle)
-    for _, existing_attachment in pairs(attachments) do
-        ENTITY.SET_ENTITY_NO_COLLISION_ENTITY(existing_attachment.handle, attachment.handle)
-    end
 
     return attachment
+end
+
+local function detach_attached_vehicle()
+    if state.attached_vehicle ~= nil then
+        util.toast("Detaching "..state.attached_vehicle.name)
+        ENTITY.DETACH_ENTITY(state.attached_vehicle.handle, true, true)
+        state.attached_vehicle = nil
+    end
 end
 
 local function attach_nearest_vehicle()
@@ -128,10 +146,11 @@ local function attach_nearest_vehicle()
             attachment.position = ENTITY.GET_ENTITY_COORDS(attachment.handle, 1)
             attachment.distance = SYSTEM.VDIST(pos.x, pos.y, pos.z, attachment.position.x, attachment.position.y, attachment.position.z)
             if attachment.distance <= range then
+                detach_attached_vehicle()
                 attachment.name = VEHICLE.GET_DISPLAY_NAME_FROM_VEHICLE_MODEL(ENTITY.GET_ENTITY_MODEL(attachment.handle))
                 util.toast("Attaching "..attachment.name)
                 attach(attachment)
-                table.insert(attachments, attachment)
+                state.attached_vehicle = attachment
                 return
             end
         end
@@ -155,10 +174,5 @@ menu.action(menu.my_root(), "Attach", {}, "Any close proximity vehicles will be 
 end)
 
 menu.action(menu.my_root(), "Detach", {}, "", function()
-    array_remove(attachments, function(t, i, j)
-        local attachment = t[i]
-        util.toast("Detaching "..attachment.name)
-        ENTITY.DETACH_ENTITY(attachment.handle, true, true)
-        return true
-    end)
+    detach_attached_vehicle()
 end)
