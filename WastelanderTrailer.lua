@@ -1,7 +1,7 @@
 -- WastelanderTrailer
 -- by Hexarobi
 
-local SCRIPT_VERSION = "0.3"
+local SCRIPT_VERSION = "0.4"
 
 ---
 --- Auto-Updater Lib Install
@@ -81,7 +81,7 @@ local function get_vehicle_dimension(vehicle)
     MISC.GET_MODEL_DIMENSIONS(ENTITY.GET_ENTITY_MODEL(vehicle), minimum, maximum)
     local minimum_vec = v3.new(minimum)
     local maximum_vec = v3.new(maximum)
-    return {x = maximum_vec.y - minimum_vec.y, y = maximum_vec.x - minimum_vec.x, z = maximum_vec.z - minimum_vec.z}
+    return {min_vec=minimum_vec, max_vec=maximum_vec, x = maximum_vec.y - minimum_vec.y, y = maximum_vec.x - minimum_vec.x, z = maximum_vec.z - minimum_vec.z}
 end
 
 local function set_attachment_offset_for_root(attachment)
@@ -92,7 +92,7 @@ local function set_attachment_offset_for_root(attachment)
         attachment.offset = {
             x=0,
             y=(dimensions.y / 2) - 2,
-            z=(dimensions.z / 2) + 0.8
+            z=(dimensions.min_vec.z) + 2.25
         }
     end
 
@@ -100,10 +100,10 @@ local function set_attachment_offset_for_root(attachment)
         attachment.offset = {
             x=0,
             y=(dimensions.y / 2) - 3,
-            z=(dimensions.z / 2) + 0.3
+            z=(dimensions.min_vec.z) + 1.8
         }
         attachment.rotation = {
-            x=8,
+            x=7,
             y=0,
             z=0,
         }
