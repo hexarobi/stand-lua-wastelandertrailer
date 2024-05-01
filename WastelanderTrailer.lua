@@ -1,7 +1,7 @@
 -- WastelanderTrailer
 -- by Hexarobi
 
-local SCRIPT_VERSION = "0.5"
+local SCRIPT_VERSION = "0.6"
 
 ---
 --- Auto-Updater Lib Install
@@ -160,7 +160,7 @@ local function set_attachment_offset_for_root(attachment)
     if root_model == "flatbed" then
         attachment.offset = {
             x=0,
-            y=(dimensions.y / 2) - 2.73,
+            y=(dimensions.y / 2) - 3.2,
             z=(dimensions.z / 2)
         }
         attachment.rotation = {x=0,y=0,z=0}
@@ -186,6 +186,15 @@ local function set_attachment_offset_for_root(attachment)
             y=0,
             z=0,
         }
+    end
+
+    if root_model == "skylift" then
+        attachment.offset = {
+            x=0,
+            y=(dimensions.y / 2) - 3,
+            z=(dimensions.z / 2) - 2
+        }
+        attachment.rotation = {x=0,y=0,z=0}
     end
 
 end
@@ -215,31 +224,74 @@ local function detach_attached_vehicle()
     end
 end
 
-local function attach_nearest_vehicle()
+local function request_control(vehicle_handle)
+    if vehicle_handle <= 0 then
+        --util.toast("No vehicle to request control of")
+        return
+    end
+    --util.toast("Requesting control...")
+    if NETWORK.NETWORK_HAS_CONTROL_OF_ENTITY(vehicle_handle) then
+        --util.toast("Control established fast")
+        return vehicle_handle
+    end
+    -- Loop until we get control
+    local netid = NETWORK.NETWORK_GET_NETWORK_ID_FROM_ENTITY(vehicle_handle)
+    local has_control_ent = false
+    local loops = 15
+    NETWORK.SET_NETWORK_ID_CAN_MIGRATE(netid, true)
+
+    -- Attempts 15 times, with 8ms per attempt
+    while not has_control_ent do
+        has_control_ent = NETWORK.NETWORK_REQUEST_CONTROL_OF_ENTITY(vehicle_handle)
+        loops = loops - 1
+        -- wait for control
+        util.yield(15)
+        if loops <= 0 then
+            break
+        end
+    end
+
+    --util.toast("Control established")
+    return vehicle_handle
+end
+
+local function find_nearest_vehicle()
     local player_vehicle = entities.get_user_vehicle_as_handle()
     if not player_vehicle then
-        util.toast("You must be in a vehicle to attach")
+        util.toast("You must be in a vehicle to attach to")
         return
     end
     local pos = ENTITY.GET_ENTITY_COORDS(player_vehicle, 1)
-    local range = 10
     local nearby_vehicles = entities.get_all_vehicles_as_handles()
-    local count = 0
+    local nearest_attachment = nil
     for _, vehicle_handle in ipairs(nearby_vehicles) do
-        if vehicle_handle ~= player_vehicle then
+        if player_vehicle and vehicle_handle ~= player_vehicle then
             local attachment = {handle=vehicle_handle, root=player_vehicle}
             attachment.position = ENTITY.GET_ENTITY_COORDS(attachment.handle, 1)
             attachment.distance = SYSTEM.VDIST(pos.x, pos.y, pos.z, attachment.position.x, attachment.position.y, attachment.position.z)
-            if attachment.distance <= range then
-                detach_attached_vehicle()
-                attachment.name = VEHICLE.GET_DISPLAY_NAME_FROM_VEHICLE_MODEL(ENTITY.GET_ENTITY_MODEL(attachment.handle))
-                util.toast("Attaching "..attachment.name)
-                attach(attachment)
-                state.attached_vehicle = attachment
-                return
+            attachment.name = VEHICLE.GET_DISPLAY_NAME_FROM_VEHICLE_MODEL(ENTITY.GET_ENTITY_MODEL(attachment.handle))
+            if nearest_attachment == nil or attachment.distance < nearest_attachment.distance then
+                nearest_attachment = attachment
             end
         end
     end
+    return nearest_attachment
+end
+
+local function attach_nearest_vehicle()
+    local attachment = find_nearest_vehicle()
+    if not attachment then
+        util.toast("Could not find a nearby vehicle to attach")
+    end
+    if not request_control(attachment.handle) then
+        util.toast("Failed to gain control of vehicle "..attachment.name)
+        return
+    end
+    detach_attached_vehicle()
+    util.toast("Attaching "..attachment.name)
+    attach(attachment)
+    state.attached_vehicle = attachment
+    return
 end
 
 ---
@@ -267,6 +319,9 @@ menu.action(menus.spawn_truck, "Slamtruck", {}, "Spawn a Slamtruck for towing", 
 end)
 menu.action(menus.spawn_truck, "Flatbed", {}, "Spawn a Slamtruck for towing", function()
     menu.trigger_commands("flatbed")
+end)
+menu.action(menus.spawn_truck, "Skylift", {}, "Spawn a SkyLift for helicopter lifting", function()
+    menu.trigger_commands("skylift")
 end)
 
 menu.action(menu.my_root(), "Attach", {}, "Any close proximity vehicles will be attached to your current one", function()
