@@ -1,34 +1,7 @@
 -- WastelanderTrailer
 -- by Hexarobi
 
-local SCRIPT_VERSION = "0.6"
-
----
---- Auto-Updater Lib Install
----
-
--- Auto Updater from https://github.com/hexarobi/stand-lua-auto-updater
-local status, auto_updater = pcall(require, "auto-updater")
-if not status then
-    local auto_update_complete = nil util.toast("Installing auto-updater...", TOAST_ALL)
-    async_http.init("raw.githubusercontent.com", "/hexarobi/stand-lua-auto-updater/main/auto-updater.lua",
-            function(result, headers, status_code)
-                local function parse_auto_update_result(result, headers, status_code)
-                    local error_prefix = "Error downloading auto-updater: "
-                    if status_code ~= 200 then util.toast(error_prefix..status_code, TOAST_ALL) return false end
-                    if not result or result == "" then util.toast(error_prefix.."Found empty file.", TOAST_ALL) return false end
-                    filesystem.mkdir(filesystem.scripts_dir() .. "lib")
-                    local file = io.open(filesystem.scripts_dir() .. "lib\\auto-updater.lua", "wb")
-                    if file == nil then util.toast(error_prefix.."Could not open file for writing.", TOAST_ALL) return false end
-                    file:write(result) file:close() util.toast("Successfully installed auto-updater lib", TOAST_ALL) return true
-                end
-                auto_update_complete = parse_auto_update_result(result, headers, status_code)
-            end, function() util.toast("Error downloading auto-updater lib. Update failed to download.", TOAST_ALL) end)
-    async_http.dispatch() local i = 1 while (auto_update_complete == nil and i < 40) do util.yield(250) i = i + 1 end
-    if auto_update_complete == nil then error("Error downloading auto-updater lib. HTTP Request timeout") end
-    auto_updater = require("auto-updater")
-end
-if auto_updater == true then error("Invalid auto-updater lib. Please delete your Stand/Lua Scripts/lib/auto-updater.lua and try again") end
+local SCRIPT_VERSION = "0.7"
 
 ---
 --- Auto Update
@@ -37,15 +10,20 @@ if auto_updater == true then error("Invalid auto-updater lib. Please delete your
 local auto_update_config = {
     source_url = "https://raw.githubusercontent.com/hexarobi/stand-lua-wastelandertrailer/main/WastelanderTrailer.lua",
     script_relpath = SCRIPT_RELPATH,
-    draw_bounding_box = false,
 }
-auto_updater.run_auto_update(auto_update_config)
+
+util.ensure_package_is_installed('lua/auto-updater')
+local auto_updater = require('auto-updater')
+if auto_updater == true then
+    auto_updater.run_auto_update(auto_update_config)
+end
 
 ---
 --- Dependencies
 ---
 
-util.require_natives(1651208000)
+util.require_natives("3095a")
+util.ensure_package_is_installed('lua/quaternionLib')
 local quaternionLib = require("quaternionLib")
 
 ---
@@ -54,6 +32,7 @@ local quaternionLib = require("quaternionLib")
 
 local config = {
     edit_offset_step = 1,
+    draw_bounding_box=true,
     preview_bounding_box_color = {r=255,g=0,b=255,a=255}
 }
 
@@ -137,10 +116,10 @@ local function update_attachment_position(attachment)
         attachment.collision = true
     end
     ENTITY.ATTACH_ENTITY_TO_ENTITY(
-            attachment.handle, attachment.root, attachment.bone_index or 0,
-            attachment.offset.x or 0, attachment.offset.y or 0, attachment.offset.z or 0,
-            attachment.rotation.x or 0, attachment.rotation.y or 0, attachment.rotation.z or 0,
-            false, true, attachment.collision, false, 2, true
+        attachment.handle, attachment.root, attachment.bone_index or 0,
+        attachment.offset.x or 0, attachment.offset.y or 0, attachment.offset.z or 0,
+        attachment.rotation.x or 0, attachment.rotation.y or 0, attachment.rotation.z or 0,
+        false, true, attachment.collision, false, 2, true, 0
     )
 end
 
@@ -196,27 +175,29 @@ local function set_attachment_offset_for_root(attachment)
         }
         attachment.rotation = {x=0,y=0,z=0}
     end
+end
 
+local function refresh_attachment(attachment)
+    entities.request_control(attachment.handle)
+    ENTITY.SET_ENTITY_HAS_GRAVITY(attachment.handle, false)
+    update_attachment_position(attachment)
+    ENTITY.SET_ENTITY_NO_COLLISION_ENTITY(attachment.root, attachment.handle)
 end
 
 local function attach(attachment)
     attachment.is_attached = true
     attachment.position = ENTITY.GET_ENTITY_COORDS(attachment.root)
-    ENTITY.SET_ENTITY_HAS_GRAVITY(attachment.handle, false)
     set_attachment_offset_for_root(attachment)
-    update_attachment_position(attachment)
-
-    ENTITY.SET_ENTITY_NO_COLLISION_ENTITY(attachment.root, attachment.handle)
-
+    refresh_attachment(attachment)
     menus.position_x.value = math.floor(attachment.offset.x * 100)
     menus.position_y.value = math.floor(attachment.offset.y * -100)
     menus.position_z.value = math.floor(attachment.offset.z * -100)
-
     return attachment
 end
 
 local function detach_attached_vehicle()
-    if state.attached_vehicle ~= nil and state.attached_vehicle.is_attached then
+    if state.attached_vehicle ~= nil and state.attached_vehicle.is_attached
+            and entities.request_control(state.attached_vehicle.handle) then
         util.toast("Detaching "..state.attached_vehicle.name)
         state.attached_vehicle.is_attached = false
         ENTITY.DETACH_ENTITY(state.attached_vehicle.handle, true, true)
@@ -283,7 +264,7 @@ local function attach_nearest_vehicle()
     if not attachment then
         util.toast("Could not find a nearby vehicle to attach")
     end
-    if not request_control(attachment.handle) then
+    if not entities.request_control(attachment.handle) then
         util.toast("Failed to gain control of vehicle "..attachment.name)
         return
     end
@@ -299,8 +280,11 @@ end
 ---
 
 local function draw_bounding_box_tick()
-    if config.draw_bounding_box and state.attached_vehicle ~= nil then
-        draw_bounding_box(state.attached_vehicle.handle, config.preview_bounding_box_color)
+    if state.attached_vehicle and state.attached_vehicle.is_attached and state.attached_vehicle.handle then
+        refresh_attachment(state.attached_vehicle)
+        if config.draw_bounding_box then
+            draw_bounding_box(state.attached_vehicle.handle, config.preview_bounding_box_color)
+        end
     end
 end
 
@@ -336,14 +320,17 @@ end)
 menus.adjust_position = menu.list(menu.my_root(), "Adjust Position")
 
 menus.position_x = menu.slider_float(menus.adjust_position, "X: Left / Right", { "wastetrailerposx"}, "", -10000000, 10000000, math.floor(state.attached_vehicle.offset.x * 100), config.edit_offset_step, function(value)
-    state.attached_vehicle.offset.x = value / 100
-    update_attachment_position(state.attached_vehicle)
+    if state.attached_vehicle then
+        state.attached_vehicle.offset.x = value / 100
+    end
 end)
 menus.position_y = menu.slider_float(menus.adjust_position, "Y: Forward / Back", {"wastetrailerposy"}, "", -10000000, 10000000, math.floor(state.attached_vehicle.offset.y * -100), config.edit_offset_step, function(value)
-    state.attached_vehicle.offset.y = value / -100
-    update_attachment_position(state.attached_vehicle)
+    if state.attached_vehicle then
+        state.attached_vehicle.offset.y = value / -100
+    end
 end)
 menus.position_z = menu.slider_float(menus.adjust_position, "Z: Up / Down", {"wastetrailerposz"}, "", -10000000, 10000000, math.floor(state.attached_vehicle.offset.z * -100), config.edit_offset_step, function(value)
-    state.attached_vehicle.offset.z = value / -100
-    update_attachment_position(state.attached_vehicle)
+    if state.attached_vehicle then
+        state.attached_vehicle.offset.z = value / -100
+    end
 end)
